@@ -55,8 +55,22 @@ else(IS_ICPC)
     add_definitions(-DBOOST_TEST_DYN_LINK)
 endif(IS_ICPC)
 
+find_package(roslib)
 find_package(Boost 1.54 COMPONENTS serialization filesystem system program_options REQUIRED)
 include_directories(${Boost_INCLUDE_DIR})
+
+find_package(catkin REQUIRED
+  COMPONENTS
+    moveit_core
+    moveit_ros_planning
+    moveit_ros_planning_interface
+    pluginlib
+    geometric_shapes
+    moveit_visual_tools
+)
+find_package(Boost REQUIRED system filesystem date_time thread)
+include_directories(${catkin_INCLUDE_DIRS})
+
 
 # Add support in Boost::Python for std::shared_ptr
 # This is a hack that replaces boost::shared_ptr related code with std::shared_ptr.

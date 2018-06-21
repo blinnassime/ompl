@@ -1,3 +1,6 @@
+SET(ZMQ_LIB "-lzmq")
+include_directories("/opt/ros/kinetic/include")
+
 #############################################
 # Construct configuration file              #
 #############################################
@@ -59,6 +62,8 @@ target_link_libraries(ompl
   ${Boost_FILESYSTEM_LIBRARY}
   ${Boost_SYSTEM_LIBRARY}
   ${Boost_CHRONO_LIBRARY}
+  ${ZMQ_LIB}
+  ${catkin_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT})
 
 if(MSVC)
