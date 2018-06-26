@@ -111,7 +111,7 @@ ompl::geometric::CIRRT::CIRRT(const base::SpaceInformationPtr &si) : base::Plann
     running_ = true;
     threads_.push_back(std::thread(&ompl::geometric::CIRRT::InteractiveThread, this, "thread argument"));
 
-    sleep(5);
+    sleep(30);
     cout << "END CONSTRUCTOR\n";
 
 }
@@ -141,42 +141,63 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
     /* Get the configuration for the joints in the right arm of the PR2*/
     const robot_model::JointModelGroup *joint_model_group = kinematic_model->getJointModelGroup("right_arm");
 
-    /* PUBLISH RANDOM ARM POSITIONS */
-    //ros::NodeHandle nh; 
+    // Advertise the state publisher
     ros::Publisher robot_state_publisher = nh.advertise<moveit_msgs::DisplayRobotState>("display_robot_state", 1); 
 
+    std::vector<double> positions(46);
+    positions.clear(); 
+    //for (int i=0; i<46; i++) positions[i]=0;
 
     // version zmq
     if(1)
     while(running_)
     {
-        cout << "thread running" <<endl;
 
 
         //* receive configuration using zmq server
-        double buffer [10];
-        //cout <<"waiting for receive" << endl;
-        zmq_recv (responder, buffer, sizeof(double)*10, 0);
-        //printf("\nrec:");
-        //for(int i=0; i<10; i++) printf("%lf ", buffer[i]);
-        //cout <<"waiting for send\n";
-        zmq_send (responder, buffer, 0, 0);
-        //cout <<"sent\n\n";
-        //*/
-       
-        // current variable values 
-        const double * var_values = kinematic_state->getVariablePositions();
-        // dimension of the robot 
-        std::size_t dimension = kinematic_model->getVariableCount();
-        // names of the planning group 
-        const std::vector< std::string>& group_name_vector_ref = joint_model_group->getJointModelNames();
+        double config[14];
+        for (int j=0; j<15; j++)
+        {
+            cout << j<<" ";
+            char buffer [7];
+            zmq_recv (responder, buffer, sizeof(char)*7, 0); 
+            //printf("\nrec:");
+            string value_s="";
+            string start_s="start  ";
+            for(int i=0; i<7; i++){
+                //printf("%x ", buffer[i]);
+                value_s.push_back(buffer[i]);
+            }   
+            //printf("%s \n", buffer);        
+            //value_s.push_back('\0');
 
-        //set robot to random position
-        //kinematic_state->setToRandomPositions(joint_model_group);
-        //cout << "random positions\n";
-        //for (unsigned int i = 0; i<dimension; i++) cout <<" rdim " << i << "=" << var_values[i];
-            //cout << endl;
-            //cout << endl;
+            //cout << "\ncomparaison "; 
+            //for (int i=0; i<8; i++)
+            //{ 
+                //printf("%X %X  ", start_s[i], value_s[i]);
+            //}cout <<endl; 
+            double value = 0;  
+            if(value_s==start_s)
+            {   
+                //cout << "\nstart value\n";  
+            }   
+            else {
+                //cout << "not start value\n";  
+                value = std::stof(value_s);
+                config[j-1] = value;
+                //cout << "\t" << value; 
+            }   
+            //sleep (1);          //  Do some 'work'
+            zmq_send (responder, buffer, 0, 0); 
+        }
+        printf("\nrec:");
+        for (int j=0; j<14; j++)
+            cout << config[j] << "\t";
+        cout << endl; 
+
+        
+       
+
 
 
         //*
@@ -190,24 +211,17 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
         //}
 
         // set configuration vector to incoming configuration
-        std::vector<double> positions(46);
         // for baxter
         for (int i=17; i<24; i++){
             //double val = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i-17];
             //cout << " rand " << val;
-            positions[i] = buffer[i-17];
+            positions[i] = config[i-17];
         }
         
         q_u_mut_.lock();
         q_user_ = positions; 
         q_u_mut_.unlock();
 
-        /*
-        q_u_mut_.lock();
-        for (int i=0; i<dimension_; i++)
-            q_user_[i] = 0;
-        q_u_mut_.unlock();
-        //*/
 
         // set robot to configuration vector
         kinematic_state->setVariablePositions(positions);     
@@ -219,74 +233,11 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
         ros::spinOnce();
         usleep(10000);
 
-        // print values
-        //std::size_t dimension = kinematic_model->getVariableCount();
-        //const double* var_values = kinematic_state->getVariablePositions();
-            //for (unsigned int i = 0; i<dimension; i++) cout <<" pdim " << i << "=" << var_values[i];
-            //cout << endl;
-            //cout << endl;
         
-        /*
-        const std::vector< std::string> & name_vector_ref = kinematic_state->getVariableNames();
-        var_values = kinematic_state->getVariablePositions();
-
-        const std::vector< std::string> & group_name_vector_ref = joint_model_group->getJointModelNames();
-        std::vector< std::string> nc_group_name_vector(group_name_vector_ref);
-        unsigned long int length_name_vector_ref = group_name_vector_ref.size();
-
-        cout << "dimension "<<dimension<< " length vector " << length_name_vector_ref << endl;
-        for (int i = 0; i<dimension; i++) cout <<" dim " << i << "=" << var_values[i];
-        cout << endl;
-        cout <<"variables names ";
-        for (int i = 0; i<dimension; i++) cout << name_vector_ref[i] << " ";
-        cout << endl;
-        cout <<"group variables names ";
-        for (int i = 0; i<length_name_vector_ref; i++) cout << group_name_vector_ref[i] << " ";
-        cout << endl;
-        cout <<"nc group variables names avant" << endl;
-        for (int i = 0; i<nc_group_name_vector.size(); i++)
-            cout << nc_group_name_vector[i] << " ";
-        cout << endl;
-        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+3);
-        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+5);
-        cout <<"nc group variables names après " << endl;
-        for (int i = 0; i<nc_group_name_vector.size(); i++)
-            cout << nc_group_name_vector[i] << " ";
-        cout << endl;
-        cout <<"group variables positions ";
-        for (int i = 0; i<nc_group_name_vector.size(); i++) 
-            cout << kinematic_state->getVariablePosition(nc_group_name_vector[i])<< " ";
-        cout << endl;
-        cout <<"variables positions ";
-        for (int i = 0; i<length_name_vector_ref; i++) 
-            cout << kinematic_state->getVariablePosition(name_vector_ref[i])<< " ";
-        cout << endl;
-        //*/
 
 
 
 
-        if(0)
-        for (int cnt = 0; cnt < 1 && ros::ok(); cnt++)
-        {
-            if (!running_) break;
-            kinematic_state->setToRandomPositions(joint_model_group);
-
-
-            /* get a robot state message describing the pose in kinematic_state */
-            moveit_msgs::DisplayRobotState msg;
-            robot_state::robotStateToRobotStateMsg(*kinematic_state, msg.state);
-
-            /* send the message to the RobotState display */
-            robot_state_publisher.publish(msg);
-
-            /* let ROS send the message, then wait a while */
-            ros::spinOnce();
-            //loop_rate.sleep();
-
-            //sleep(1);
-            usleep(100000);
-        }
 
         ////////////////////////INTERACTIVE SHOW
 
@@ -859,3 +810,91 @@ ompl::geometric::CIRRT::CIRRT(const base::SpaceInformationPtr &si) : base::Plann
     // moveit_msgs::PlanningScene
     //*/
 
+
+
+        /* read joint angles in function of names and such
+        const std::vector< std::string> & name_vector_ref = kinematic_state->getVariableNames();
+        var_values = kinematic_state->getVariablePositions();
+
+        const std::vector< std::string> & group_name_vector_ref = joint_model_group->getJointModelNames();
+        std::vector< std::string> nc_group_name_vector(group_name_vector_ref);
+        unsigned long int length_name_vector_ref = group_name_vector_ref.size();
+
+        cout << "dimension "<<dimension<< " length vector " << length_name_vector_ref << endl;
+        for (int i = 0; i<dimension; i++) cout <<" dim " << i << "=" << var_values[i];
+        cout << endl;
+        cout <<"variables names ";
+        for (int i = 0; i<dimension; i++) cout << name_vector_ref[i] << " ";
+        cout << endl;
+        cout <<"group variables names ";
+        for (int i = 0; i<length_name_vector_ref; i++) cout << group_name_vector_ref[i] << " ";
+        cout << endl;
+        cout <<"nc group variables names avant" << endl;
+        for (int i = 0; i<nc_group_name_vector.size(); i++)
+            cout << nc_group_name_vector[i] << " ";
+        cout << endl;
+        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+3);
+        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+5);
+        cout <<"nc group variables names après " << endl;
+        for (int i = 0; i<nc_group_name_vector.size(); i++)
+            cout << nc_group_name_vector[i] << " ";
+        cout << endl;
+        cout <<"group variables positions ";
+        for (int i = 0; i<nc_group_name_vector.size(); i++) 
+            cout << kinematic_state->getVariablePosition(nc_group_name_vector[i])<< " ";
+        cout << endl;
+        cout <<"variables positions ";
+        for (int i = 0; i<length_name_vector_ref; i++) 
+            cout << kinematic_state->getVariablePosition(name_vector_ref[i])<< " ";
+        cout << endl;
+        //*/
+        //
+        //
+
+        /* receive configuration using zmq server previous version before yichen
+        double buffer [10];
+        //cout <<"waiting for receive" << endl;
+        zmq_recv (responder, buffer, sizeof(double)*10, 0);
+        //printf("\nrec:");
+        //for(int i=0; i<10; i++) printf("%lf ", buffer[i]);
+        //cout <<"waiting for send\n";
+        zmq_send (responder, buffer, 0, 0);
+        //cout <<"sent\n\n";
+        //*/
+        
+
+        // current variable values 
+        //const double * var_values = kinematic_state->getVariablePositions();
+        // dimension of the robot 
+        //std::size_t dimension = kinematic_model->getVariableCount();
+        // names of the planning group 
+        //const std::vector< std::string>& group_name_vector_ref = joint_model_group->getJointModelNames();
+        // print values
+        //std::size_t dimension = kinematic_model->getVariableCount();
+        //const double* var_values = kinematic_state->getVariablePositions();
+            //for (unsigned int i = 0; i<dimension; i++) cout <<" pdim " << i << "=" << var_values[i];
+            //cout << endl;
+            //cout << endl;
+        
+        /* show random positions
+        if(0)
+        for (int cnt = 0; cnt < 1 && ros::ok(); cnt++)
+        {
+            if (!running_) break;
+            kinematic_state->setToRandomPositions(joint_model_group);
+
+
+            // get a robot state message describing the pose in kinematic_state 
+            moveit_msgs::DisplayRobotState msg;
+            robot_state::robotStateToRobotStateMsg(*kinematic_state, msg.state);
+
+            // send the message to the RobotState display 
+            robot_state_publisher.publish(msg);
+
+            // let ROS send the message, then wait a while 
+            ros::spinOnce();
+            //loop_rate.sleep();
+
+            //sleep(1);
+            usleep(100000);
+        }
