@@ -110,7 +110,7 @@ ompl::geometric::CIRRT::CIRRT(const base::SpaceInformationPtr &si) : base::Plann
     running_ = true;
     threads_.push_back(std::thread(&ompl::geometric::CIRRT::InteractiveThread, this, "thread argument"));
 
-    sleep(30);
+    //sleep(100);
     cout << "END CONSTRUCTOR\n";
 
 }
@@ -161,24 +161,29 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
     
         for (int j=0; j<15; j++)
         {
-            cout << j<<" ";
+            //cout <<">"<< j<<"<"<<endl;
             char buffer [7];
             zmq_recv (responder, buffer, sizeof(char)*7, 0); 
             //printf("\nrec:");
-            string value_s="";
+            string value_s;//="";
             string start_s="start  ";
             for(int i=0; i<7; i++){
                 //printf("%x ", buffer[i]);
                 value_s.push_back(buffer[i]);
             }   
             //printf("%s \n", buffer);        
-            //value_s.push_back('\0');
 
-            //cout << "\ncomparaison "; 
-            //for (int i=0; i<8; i++)
-            //{ 
-                //printf("%X %X  ", start_s[i], value_s[i]);
-            //}cout <<endl; 
+            /* //print comparison
+            cout << "\ncomparison "; 
+            for (int i=0; i<7; i++)
+            { 
+                printf("%X %X  ", start_s[i], value_s[i]);
+            }cout <<endl;
+            for (int i=0; i<value_s.length(); i++) printf("%X.",value_s[i]);
+            cout << endl;
+            for (int i=0; i<start_s.length(); i++) printf("%X.",start_s[i]);
+            cout << endl;
+            //*/ 
             double value = 0;  
             if(value_s==start_s)
             {   
@@ -192,11 +197,15 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
             }   
             zmq_send (responder, buffer, 0, 0); 
         }
+        cout << endl;
 
 
-        
+        //for (int i=0; i<14; i++) printf("%lf\t",config[i]);
+        //cout << endl;
+        //cout << endl;
+
         /* receive configuration using zmq server previous version before yichen
-        double buffer [10];
+           double buffer [10];
         //cout <<"waiting for receive" << endl;
         zmq_recv (responder, buffer, sizeof(double)*10, 0);
         //printf("\nrec:");
@@ -204,14 +213,56 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
         //cout <<"waiting for send\n";
         zmq_send (responder, buffer, 0, 0);
         //cout <<"sent\n\n";
+
+
         //*/
-       
+
         // current variable values 
         const double * var_values = kinematic_state->getVariablePositions();
         // dimension of the robot 
         std::size_t dimension = kinematic_model->getVariableCount();
         // names of the planning group 
         const std::vector< std::string>& group_name_vector_ref = joint_model_group->getJointModelNames();
+
+
+        //* read joint angles in function of names and such
+        const std::vector< std::string> & name_vector_ref = kinematic_state->getVariableNames();
+        var_values = kinematic_state->getVariablePositions();
+
+        //const std::vector< std::string> & group_name_vector_ref = joint_model_group->getJointModelNames();
+        std::vector< std::string> nc_group_name_vector(group_name_vector_ref);
+        unsigned long int length_name_vector_ref = group_name_vector_ref.size();
+
+        //cout << "dimension "<<dimension<< " length vector " << length_name_vector_ref << endl;
+        //for (int i = 0; i<dimension; i++) cout <<" dim " << i << "=" << var_values[i];
+        //cout << endl;
+        //cout <<"variables names ";
+        //for (int i = 0; i<dimension; i++) cout << i << " " << name_vector_ref[i] << " ";
+        //cout << endl;
+        //cout <<"group variables names ";
+        //for (int i = 0; i<length_name_vector_ref; i++) cout << i << " " << group_name_vector_ref[i] << " ";
+        //cout << endl;
+        //cout <<"nc group variables names avant" << endl;
+        //for (int i = 0; i<nc_group_name_vector.size(); i++)
+            //cout << nc_group_name_vector[i] << " ";
+        //cout << endl;
+        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+3);
+        nc_group_name_vector.erase(nc_group_name_vector.cbegin()+5);
+        //cout <<"nc group variables names après " << endl;
+        //for (int i = 0; i<nc_group_name_vector.size(); i++)
+            //cout << nc_group_name_vector[i] << " ";
+        //cout << endl;
+        /*
+        cout <<"group variables positions ";
+        for (int i = 0; i<nc_group_name_vector.size(); i++) 
+            cout << kinematic_state->getVariablePosition(nc_group_name_vector[i])<< " ";
+        cout << endl;
+        cout <<"variables positions ";
+        for (int i = 0; i<length_name_vector_ref; i++) 
+            cout << kinematic_state->getVariablePosition(name_vector_ref[i])<< " ";
+        cout << endl;
+        //*/
+
 
         //set robot to random position
         //kinematic_state->setToRandomPositions(joint_model_group);
@@ -233,11 +284,16 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
 
         // set configuration vector to incoming configuration
         // for baxter
-        for (int i=17; i<24; i++){
-            //double val = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i-17];
-            //cout << " rand " << val;
-            positions[i] = config[i-17];
+        for (int i=8; i<15; i++){
+            positions[i] = config[i-8];
         }
+        positions[15] = positions[16] = 0;
+        for (int i=17; i<24; i++){
+            positions[i] = config[i-10];
+        }
+        //cout << "après copie" << endl;
+        //for (int i=0; i<24; i++) cout << i << " " << positions[i] << " ";
+        //cout << endl; 
         
         q_u_mut_.lock();
         q_user_ = positions; 
@@ -272,7 +328,7 @@ void ompl::geometric::CIRRT::InteractiveThread(std::string msg){
         robot_state::robotStateToRobotStateMsg(*kinematic_state, msg.state);
         robot_state_publisher.publish(msg);
         ros::spinOnce();
-        usleep(10000);
+        //usleep(10000);
 
         // print values
         //std::size_t dimension = kinematic_model->getVariableCount();
@@ -399,15 +455,16 @@ ompl::base::PlannerStatus ompl::geometric::CIRRT::solve(const base::PlannerTermi
     static unsigned int iter = 0;
     while (!ptc)
     {
-        //double alpha = 1;
-        double alpha = 0.5;
+        double alpha = 1;
+        //double alpha = 0.5;
+        //double alpha = 0.9;
 
         double r = rand();
         r = r / RAND_MAX;
 
         std::cout << "CI-RRT iteration " <<++iter<< " r=" << r;
         if (r<alpha){
-            cout << " random\n";
+            cout << "\trandom\n";
             /* sample random state (with goal biasing) */
             if ((goal_s != nullptr) && rng_.uniform01() < goalBias_ && goal_s->canSample())
             {
@@ -422,7 +479,7 @@ ompl::base::PlannerStatus ompl::geometric::CIRRT::solve(const base::PlannerTermi
         else
         {
             // take human input
-            cout << " human\n";
+            cout << "\thuman\n";
             // set configuration vector to incoming configuration for baxter right arm
             q_u_mut_.lock(); 
             for (int i=17; i<24; i++){
