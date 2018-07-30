@@ -40,6 +40,11 @@
 #include "ompl/datastructures/NearestNeighbors.h"
 #include "ompl/geometric/planners/PlannerIncludes.h"
 
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <moveit_visual_tools/moveit_visual_tools.h>
+
 namespace ompl
 {
     namespace geometric
@@ -66,6 +71,10 @@ namespace ompl
 
             ~RRTConnect() override;
 
+            // INTERACTIVE SHOW
+            void displayState(std::vector<double>& config); 
+
+            void InteractiveThread(std::string msg);
             void getPlannerData(base::PlannerData &data) const override;
 
             base::PlannerStatus solve(const base::PlannerTerminationCondition &ptc) override;
@@ -191,6 +200,19 @@ namespace ompl
 
             /** \brief Distance between the nearest pair of start tree and goal tree nodes. */
             double distanceBetweenTrees_;
+
+
+           private: 
+            std::vector<std::thread> threads_;
+            //double q_user_[14];
+            std::mutex q_u_mut_;
+            static boost::mutex mut_;
+            unsigned short int dimension_;
+            bool running_;
+            double delay_;
+            base::State *rstate;// = rmotion->state;
+            // For visualizing things in rviz
+            moveit_visual_tools::MoveItVisualToolsPtr visual_tools_;
         };
     }
 }

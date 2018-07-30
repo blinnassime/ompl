@@ -38,6 +38,65 @@
 #include "ompl/base/goals/GoalSampleableRegion.h"
 #include "ompl/tools/config/SelfConfig.h"
 
+
+
+#include <ompl/base/spaces/DiscreteStateSpace.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <typeinfo>
+#include <ompl/base/samplers/UniformValidStateSampler.h>
+#include <zmq.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <assert.h>
+
+#include <Eigen/Core>
+#include <eigen_stl_containers/eigen_stl_containers.h>
+
+#include <ros/ros.h>
+
+// MoveIt!
+#include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_model/robot_model.h>
+#include <moveit/robot_state/robot_state.h>
+
+// Robot state publishing
+#include <moveit/robot_state/conversions.h>
+#include <moveit_msgs/DisplayRobotState.h>
+//
+// PI
+#include <boost/thread/mutex.hpp>
+#include <boost/math/constants/constants.hpp>
+//
+#include <thread>
+
+#include "geometric_shapes/shapes.h"
+#include "geometric_shapes/mesh_operations.h"
+#include "geometric_shapes/shape_operations.h"
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
+#include <moveit/move_group_interface/move_group.h>
+
+#include <moveit/move_group_interface/move_group.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
+
+#include <moveit_msgs/DisplayRobotState.h>
+#include <moveit_msgs/DisplayTrajectory.h>
+
+#include <moveit_msgs/AttachedCollisionObject.h>
+#include <moveit_msgs/CollisionObject.h>
+#include <moveit_msgs/ApplyPlanningScene.h>
+
+using namespace std;
+// static mutex
+boost::mutex ompl::geometric::RRTConnect::mut_;
+// global variables to move
+ros::NodeHandle nh; 
+robot_state::RobotState* rsptr;
+ros::Publisher robot_state_publisher;
+double a=1.1;
+double q_user__[14];
+double b=2.2;
+
 ompl::geometric::RRTConnect::RRTConnect(const base::SpaceInformationPtr &si, bool addIntermediateStates)
   : base::Planner(si, addIntermediateStates ? "RRTConnectIntermediate" : "RRTConnect")
 {
@@ -48,7 +107,182 @@ ompl::geometric::RRTConnect::RRTConnect(const base::SpaceInformationPtr &si, boo
     connectionPoint_ = std::make_pair<base::State *, base::State *>(nullptr, nullptr);
     distanceBetweenTrees_ = std::numeric_limits<double>::infinity();
     addIntermediateStates_ = addIntermediateStates;
+
+    // initialize state display
+    robot_model_loader::RobotModelLoader robot_model_loader("robot_description");
+    robot_model::RobotModelPtr kinematic_model = robot_model_loader.getModel();
+    //robot_state::RobotStatePtr kinematic_state(new robot_state::RobotState(kinematic_model));
+    rsptr = (new robot_state::RobotState(kinematic_model));
+    robot_state_publisher = nh.advertise<moveit_msgs::DisplayRobotState>("display_robot_state", 1); 
+
+    // not used right now
+    visual_tools_.reset(new moveit_visual_tools::MoveItVisualTools("base_frame","/moveit_visual_markers"));
+
+    // cirrt parameters
+    delay_= 500000;
+    running_ = true;
+    dimension_ = 24;
+    //for (int i=0; i<14; i++) q_user_[i]=0;
+    threads_.push_back(std::thread(&ompl::geometric::RRTConnect::InteractiveThread, this, "thread argument"));
+    sleep(0);
 }
+
+
+void ompl::geometric::RRTConnect::InteractiveThread(std::string msg){
+    cout << "starting thread\n";
+    void *context = zmq_ctx_new ();
+    void *responder = zmq_socket (context, ZMQ_REP);
+    int rc = zmq_bind (responder, "tcp://*:5555");
+    assert (rc == 0);
+    rc += 0;
+
+
+    static const std::string PLANNING_GROUP = "both_arms";
+
+    // The :move_group_interface:`MoveGroup` class can be easily
+    // setup using just the name of the planning group you would like to control and plan for.
+    moveit::planning_interface::MoveGroupInterface move_group(PLANNING_GROUP);
+
+    //Define a collision object ROS message.
+    moveit_msgs::CollisionObject collision_object;
+    collision_object.header.frame_id = move_group.getPlanningFrame();
+    std::vector<moveit_msgs::CollisionObject> collision_objects;
+    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
+    // The id of the object is used to identify it.
+    collision_object.id = "box1";
+
+    // Define a box to add to the world.
+    shape_msgs::SolidPrimitive primitive;
+    primitive.type = primitive.BOX;
+    primitive.dimensions.resize(3);
+    primitive.dimensions[0] = 0.4;
+    primitive.dimensions[1] = 0.1;
+    primitive.dimensions[2] = 0.4;
+
+    //Define a pose for the box (specified relative to frame_id)
+    geometry_msgs::Pose box_pose;
+    box_pose.orientation.w = 1.0;
+    box_pose.position.x = 0.6;
+    box_pose.position.y = -0.4;
+    box_pose.position.z = 1.2;
+
+    collision_object.primitives.push_back(primitive);
+    collision_object.primitive_poses.push_back(box_pose);
+    collision_object.operation = collision_object.ADD;
+
+    collision_objects.push_back(collision_object);
+
+    // Now, let's add the collision object into the world
+    ROS_INFO_NAMED("tutorial", "Add an object into the world");
+    planning_scene_interface.addCollisionObjects(collision_objects);
+    // Show text in Rviz of status
+    //visual_tools.publishText(text_pose, "Add object", rvt::WHITE, rvt::XLARGE);
+    //visual_tools.trigger();
+    // Sleep to allow MoveGroup to recieve and process the collision object message
+    ros::Duration(1.0).sleep();
+
+    const rviz_visual_tools::colors& color;
+    const Eigen::Affine3d& tip_pose(1,1,1) ;
+
+
+    if(1)
+    while(running_)
+    {
+        cout << "thread running" <<endl;
+
+        //* receive configuration using zmq server
+        double config[46];
+        memset (config, 0, 46*sizeof(double));
+   
+        if(1) 
+        for (int j=0; j<15; j++)
+        {
+            //cout <<">"<< j<<"<"<<endl;
+            char buffer [7];
+            zmq_recv (responder, buffer, sizeof(char)*7, 0); 
+            //printf("\nrec:");
+            string value_s;//="";
+            string start_s="start  ";
+            for(int i=0; i<7; i++){
+                //printf("%x ", buffer[i]);
+                value_s.push_back(buffer[i]);
+            }   
+            //printf("%s \n", buffer);        
+
+            /* //print comparison
+            cout << "\ncomparison "; 
+            for (int i=0; i<7; i++)
+            { 
+                printf("%X %X  ", start_s[i], value_s[i]);
+            }cout <<endl;
+            for (int i=0; i<value_s.length(); i++) printf("%X.",value_s[i]);
+            cout << endl;
+            for (int i=0; i<start_s.length(); i++) printf("%X.",start_s[i]);
+            cout << endl;
+            //*/ 
+            double value = 0;  
+            if(value_s==start_s)
+            {   
+                //cout << "\nstart value\n";  
+            }   
+            else {
+                //cout << "not start value\n";  
+                value = std::stof(value_s);
+                config[j-1] = value;
+                //cout << "\t" << value; 
+            }   
+            zmq_send (responder, buffer, 0, 0); 
+        }
+        //cout << endl;
+        //cout << "config:";
+        //for (int i=0; i<14; i++) printf("%lf\t",config[i]);
+        //cout << endl;
+
+        //std::vector<double> config_v(dimension_);
+        //for (int i=0; i<14; i++){
+            //config_v[i] = config[i];
+            //cout << "config_v["<<i<<"]="<<config_v[i]<<" ";
+        //}
+        //cout<<endl;
+        //displayState(config_v); 
+
+        //mut_.lock();
+        //for (int i=8; i<15; i++){
+            //q_user_[i] = config[i-8];
+        //}
+        //for (int i=17; i<24; i++){
+            //q_user_[i] = config[i-10];
+        //}
+        //mut_.unlock();
+        mut_.lock();
+        //cout << "q_user_ before copy" << endl;
+        //for (int i=0; i<14; i++) cout << i << ":" << q_user__[i] << " ";
+        //cout << endl;
+        for (int i=0; i<14; i++){
+            //if(config[i]!=0){
+                //cout << "copying q_user__["<<i<<"] <- config["<<i<<"]i="<<config[i];
+                q_user__[i] = config[i];
+            //}
+            //else {
+                //q_user_[i] = place_middle[i];
+                //cout << "copying q_user_["<<i<<"] <- place_middle["<<i<<"]i="<<place_middle[i];
+            //}
+            //cout << "   q_user_["<<i<<"]="<<q_user_[i]<<endl;
+        }
+        //cout << endl;
+        //cout << "q_user__ after copy" << endl;
+        //for (int i=0; i<14; i++) cout << i << ":" << q_user__[i] << " ";
+        //cout << endl;
+        mut_.unlock();
+
+        
+        usleep(delay_);
+    }
+    cout << "ending interactive thread\n";
+}
+
+
 
 ompl::geometric::RRTConnect::~RRTConnect()
 {
@@ -243,12 +477,21 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
     tgi.xstate = si_->allocState();
 
     auto *rmotion = new Motion(si_);
-    base::State *rstate = rmotion->state;
+    rstate = rmotion->state;
     bool startTree = true;
     bool solved = false;
 
+    static unsigned int iter = 0;
     while (!ptc)
     {
+        //mut_.lock(); 
+        //cout << "first q_user_ in planner" << endl;
+        //for (int i=0; i<14; i++){
+            //cout << " qu "<<i<<"="<< q_user__[i] ;
+        //}   
+        //cout << endl;
+        //mut_.unlock();
+
         TreeData &tree = startTree ? tStart_ : tGoal_;
         tgi.start = startTree;
         startTree = !startTree;
@@ -272,8 +515,62 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
             }
         }
 
-        /* sample random state */
-        sampler_->sampleUniform(rstate);
+
+        ///////////////////////////////////////////////// I RRT //////////////////////
+        usleep(delay_);
+        /*mut_.lock();
+        char c;
+        cout << "input key"<<endl;
+        cin >> c;
+        mut_.unlock();//*/
+        double alpha = 1.0;
+        double r = rand();
+        r = r / RAND_MAX;
+        std::cout << "CI-RRT-Connect iteration " <<++iter<< " r=" << r;
+        if (r<alpha){
+            cout << "\trandom\n";
+
+            /* sample random state */
+            sampler_->sampleUniform(rstate);
+            //for (int i=1; i<14; i++)
+                //rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
+        }
+        if(0)if (r>=alpha)
+        {
+            cout << "\thuman\n";
+            // take human input
+            // set configuration vector to incoming configuration
+            mut_.lock(); 
+            //cout << "second q_user_ in planner" << endl;
+            for (int i=0; i<14; i++){
+                rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = q_user__[i];
+                //cout << " qu "<<i<<"="<< q_user__[i] ;
+            }   
+            //cout << endl;
+            mut_.unlock();
+        
+            
+            //ompl::base::UniformValidStateSampler validss (si_.get());
+            //ompl::base::State* valid_state = si_->allocState();
+            //bool success = false;
+            //success = validss.sampleNear(valid_state, rstate, 0.01 );
+            //cout << "sample valid state near rstate="<< success<<endl;
+            //rstate = valid_state;
+        }
+        /////////////////////////////////////////////////////////////////////////////////
+
+
+        for (int i=0; i<7; i++)
+            rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
+        for (int i=8; i<14; i++)
+            rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
+        std::vector<double> config_v(dimension_);
+        for (int i=0; i<14; i++){
+            config_v[i] = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i];
+            //cout << "config_v["<<i<<"]="<<config_v[i]<<" ";
+        }
+        cout<<endl;
+        displayState(config_v); 
 
         GrowState gs = growTree(tree, tgi, rmotion);
 
@@ -285,9 +582,12 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
             /* attempt to connect trees */
 
             /* if reached, it means we used rstate directly, no need top copy again */
-            if (gs != REACHED)
+            if (gs != REACHED){
+                cout << "REACHED :)" << endl;
                 si_->copyState(rstate, tgi.xstate);
-
+            }
+            else cout << "NOT REACHED" << endl;
+            
             GrowState gsc = ADVANCED;
             tgi.start = startTree;
             while (gsc == ADVANCED)
@@ -346,6 +646,7 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
                 break;
             }
         }
+        else cout << "TRAPPED" << endl;
     }
 
     si_->freeState(tgi.xstate);
@@ -396,4 +697,69 @@ void ompl::geometric::RRTConnect::getPlannerData(base::PlannerData &data) const
 
     // Add some info.
     data.properties["approx goal distance REAL"] = boost::lexical_cast<std::string>(distanceBetweenTrees_);
+}
+
+
+
+void ompl::geometric::RRTConnect::displayState(std::vector<double>& config){
+    short int dimension = 14; 
+    //cout << "dans fonction ";
+    //for (int i=0; i<dimension; i++)
+        //cout << "config["<<i<<"]="<<config[i]<<" ";
+    //cout <<endl;
+    std::vector<double> positions(40);
+    for (int i=0; i<dimension; i++) positions[i]=0;
+    //* set positions vector to incoming configuration, positions used for display
+    // for baxter
+    for (int i=0; i<8; i++) positions[i]=0;
+    for (int i=8; i<15; i++){
+        positions[i] = config[i-8];
+    }
+    positions[15] = positions[16] = 0;
+    for (int i=17; i<24; i++){
+        positions[i] = config[i-10];
+    }
+    //*/
+
+    //cout << "positions after copy" << endl;
+    //for (int i=0; i<24; i++) cout << i << ":" << positions[i] << " ";
+    //cout << endl; 
+
+    /* make position equal r_state_ = the configuration sent to the planner
+    // means display the planner generated configuration
+    mut_.lock();
+    double val = 0;
+    cout << "position from planner ";
+    for (int i=8; i<15; i++){
+    val = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i-8]; 
+    positions[i] = val;
+    cout << " "<<i<<"="<<val;
+    }
+    positions[15] = positions[16] = 0;
+    for (int i=17; i<24; i++){
+    val = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i-10]; 
+    positions[i] = val;
+    cout << " "<<i<<"="<<val;
+    }
+    mut_.unlock();
+
+    //*
+    cout << "positions after copy 2" << endl;
+    for (int i=0; i<24; i++) cout << i << ":" << positions[i] << " ";
+    cout << endl; 
+    //*/
+
+    // set robot to configuration vector
+    //kinematic_state->setVariablePositions(positions);     
+    rsptr->setVariablePositions(positions);     
+    //cout << 1 << endl; 
+    // send the message to the RobotState display 
+    moveit_msgs::DisplayRobotState msg;
+    //cout << 2 << endl;
+    robot_state::robotStateToRobotStateMsg(*rsptr, msg.state);
+    //cout << 3 << endl;
+    robot_state_publisher.publish(msg);
+    //cout << 4 << endl;
+    ros::spinOnce();
+    //usleep(10000);
 }
