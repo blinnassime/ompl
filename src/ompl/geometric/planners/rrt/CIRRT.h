@@ -81,7 +81,6 @@ namespace ompl
             unsigned short int dimension_;
             // robot state at each iteration        
             base::State *rstate_;
-            double delay_;
         public:
             /** \brief Constructor */
             CIRRT(const base::SpaceInformationPtr &si);
