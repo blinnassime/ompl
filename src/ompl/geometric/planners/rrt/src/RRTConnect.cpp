@@ -118,13 +118,14 @@ ompl::geometric::RRTConnect::RRTConnect(const base::SpaceInformationPtr &si, boo
     // not used right now
     visual_tools_.reset(new moveit_visual_tools::MoveItVisualTools("base_frame","/moveit_visual_markers"));
 
+    // planner parameters
+    maxDistance_ = 0.5; // range (or add range: 1 in ompl planning.yaml under type:geometric) 
+    si_->setStateValidityCheckingResolution (0.01); 
     // cirrt parameters
-    delay_= 500000;
+    delay_= 0;
     running_ = true;
     dimension_ = 24;
-    //for (int i=0; i<14; i++) q_user_[i]=0;
     threads_.push_back(std::thread(&ompl::geometric::RRTConnect::InteractiveThread, this, "thread argument"));
-    sleep(0);
 }
 
 
@@ -137,53 +138,6 @@ void ompl::geometric::RRTConnect::InteractiveThread(std::string msg){
     rc += 0;
 
 
-    static const std::string PLANNING_GROUP = "both_arms";
-
-    // The :move_group_interface:`MoveGroup` class can be easily
-    // setup using just the name of the planning group you would like to control and plan for.
-    moveit::planning_interface::MoveGroupInterface move_group(PLANNING_GROUP);
-
-    //Define a collision object ROS message.
-    moveit_msgs::CollisionObject collision_object;
-    collision_object.header.frame_id = move_group.getPlanningFrame();
-    std::vector<moveit_msgs::CollisionObject> collision_objects;
-    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
-
-    // The id of the object is used to identify it.
-    collision_object.id = "box1";
-
-    // Define a box to add to the world.
-    shape_msgs::SolidPrimitive primitive;
-    primitive.type = primitive.BOX;
-    primitive.dimensions.resize(3);
-    primitive.dimensions[0] = 0.4;
-    primitive.dimensions[1] = 0.1;
-    primitive.dimensions[2] = 0.4;
-
-    //Define a pose for the box (specified relative to frame_id)
-    geometry_msgs::Pose box_pose;
-    box_pose.orientation.w = 1.0;
-    box_pose.position.x = 0.6;
-    box_pose.position.y = -0.4;
-    box_pose.position.z = 1.2;
-
-    collision_object.primitives.push_back(primitive);
-    collision_object.primitive_poses.push_back(box_pose);
-    collision_object.operation = collision_object.ADD;
-
-    collision_objects.push_back(collision_object);
-
-    // Now, let's add the collision object into the world
-    ROS_INFO_NAMED("tutorial", "Add an object into the world");
-    planning_scene_interface.addCollisionObjects(collision_objects);
-    // Show text in Rviz of status
-    //visual_tools.publishText(text_pose, "Add object", rvt::WHITE, rvt::XLARGE);
-    //visual_tools.trigger();
-    // Sleep to allow MoveGroup to recieve and process the collision object message
-    ros::Duration(1.0).sleep();
-
-    const rviz_visual_tools::colors& color;
-    const Eigen::Affine3d& tip_pose(1,1,1) ;
 
 
     if(1)
@@ -523,7 +477,7 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
         cout << "input key"<<endl;
         cin >> c;
         mut_.unlock();//*/
-        double alpha = 1.0;
+        double alpha = 0.0;
         double r = rand();
         r = r / RAND_MAX;
         std::cout << "CI-RRT-Connect iteration " <<++iter<< " r=" << r;
@@ -535,7 +489,7 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
             //for (int i=1; i<14; i++)
                 //rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
         }
-        if(0)if (r>=alpha)
+        if(1)if (r>=alpha)
         {
             cout << "\thuman\n";
             // take human input
@@ -560,14 +514,9 @@ ompl::base::PlannerStatus ompl::geometric::RRTConnect::solve(const base::Planner
         /////////////////////////////////////////////////////////////////////////////////
 
 
-        for (int i=0; i<7; i++)
-            rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
-        for (int i=8; i<14; i++)
-            rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i] = 0;
         std::vector<double> config_v(dimension_);
         for (int i=0; i<14; i++){
             config_v[i] = rstate->as<ompl::base::RealVectorStateSpace::StateType>()->values[i];
-            //cout << "config_v["<<i<<"]="<<config_v[i]<<" ";
         }
         cout<<endl;
         displayState(config_v); 
